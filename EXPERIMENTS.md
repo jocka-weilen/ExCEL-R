@@ -1,4 +1,4 @@
-# CoSeR-CLIP 实验协议（AAAI-27）
+# CoSeR-CLIP v11.5-NT 实验协议（AAAI-27）
 
 ## 1. 主实验
 
@@ -15,7 +15,7 @@
 
 | total | classification | CAM route | online mask | structure | region |
 |---:|---:|---:|---:|---:|---:|
-| 9.2971 | 2.9788 | 3.1874 | 3.1220 | 0.0000 | 0.1785 |
+| 9.3001 | 2.9788 | 3.1870 | 3.1220 | 0.0000 | 0.2460 |
 
 这些数值只证明工程链路可执行，不是收敛结果，也不能作为论文性能比较。
 
@@ -44,11 +44,13 @@ done
 
 在完整模型基础上分别考察：
 
-1. 混淆类别数 `topk_confusions ∈ {1, 3, 5}`；
-2. 区域查询数 `num_region_queries ∈ {8, 12, 16}`；
-3. 证据预热 `warmup_iters ∈ {0, 500, 1000, 2000}`；
-4. 混淆线索：仅文本、仅视觉、仅重叠，以及三者等权；
-5. 在线标签阈值 `(tau_b, tau_f)`：`(0.15,0.50)`、`(0.20,0.55)`、`(0.25,0.60)`。
+1. 区域竞争类别数 `topk_confusions ∈ {1, 3, 5}`；
+2. 图像级缺失困难负类数 `topk_routing_negatives ∈ {1, 3, 5}`；
+3. 区域查询数 `num_region_queries ∈ {8, 12, 16}`；
+4. 证据预热 `warmup_iters ∈ {0, 500, 1000, 2000}`；
+5. 空间分配重叠间隔 `query_overlap_margin ∈ {0.1, 0.2, 0.3}`；
+6. 混淆线索：仅文本、仅视觉、仅重叠，以及三者等权；
+7. 在线标签阈值 `(tau_b, tau_f)`：`(0.15,0.50)`、`(0.20,0.55)`、`(0.25,0.60)`。
 
 示例：
 
@@ -56,6 +58,7 @@ done
 bash run_train.sh voc \
   --data_folder /path/to/VOC2012 \
   --topk_confusions 5 \
+  --topk_routing_negatives 3 \
   --num_region_queries 16 \
   --log_tag k5_q16 \
   --amp
