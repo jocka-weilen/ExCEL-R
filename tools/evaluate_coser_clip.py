@@ -71,13 +71,13 @@ def build_model(config, dataset_name, device, resize_size):
         "region_dim": config.get("region_dim", 256),
         "num_region_queries": config.get("num_region_queries", 12),
         "topk_confusions": config.get("topk_confusions", 3),
+        "topk_routing_negatives": config.get("topk_routing_negatives", 3),
         "topq_ratio": config.get("topq_ratio", 0.10),
         "warmup_iters": config.get("warmup_iters", 1000),
         "classifier_threshold": config.get("classifier_threshold", 0.35),
         "graph_temperature": config.get("graph_temperature", 0.20),
         "query_temperature": config.get("query_temperature", 0.10),
         "confusion_cue_temperature": config.get("confusion_cue_temperature", 0.20),
-        "negative_temperature": config.get("negative_temperature", 0.20),
         "activation_temperature": config.get("activation_temperature", 0.20),
         "ownership_temperature": config.get("ownership_temperature", 0.10),
         "shallow_temperature": config.get("shallow_temperature", 0.10),
@@ -186,6 +186,7 @@ def evaluate_model(args):
     print(format_tabs([cam_score, seg_score], ["CoSeR_CAM", "CoSeR_Seg"], categories))
     result = {
         "method": "CoSeR-CLIP",
+        "version": "11.5-NT",
         "dataset": args.dataset_name,
         "checkpoint": os.path.abspath(args.checkpoint),
         "scales": scales,

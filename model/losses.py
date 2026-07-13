@@ -86,7 +86,7 @@ def coser_clip_loss(
     negative_support_threshold: float = 0.30,
     shallow_gap_margin: float = 0.10,
     structure_ranking_margin: float = 0.10,
-    diversity_margin: float = 0.80,
+    query_overlap_margin: float = 0.20,
     query_usage_margin: float = 0.02,
     query_usage_weight: float = 1.0,
     ignore_index: int = 255,
@@ -161,16 +161,23 @@ def coser_clip_loss(
     structure_loss = ((positive_term + negative_term) * positive_mask).sum()
     structure_loss = structure_loss / positive_mask.sum().clamp_min(1)
 
-    nodes = F.normalize(outputs["region_nodes"], dim=-1)
-    node_similarity = torch.einsum("bkd,bjd->bkj", nodes, nodes)
-    query_count = node_similarity.shape[-1]
+    spatial_assignments = outputs["region_assignment"].transpose(1, 2)
+    normalized_assignments = F.normalize(
+        spatial_assignments, p=2, dim=-1, eps=1e-6
+    )
+    assignment_overlap = torch.einsum(
+        "bkl,bjl->bkj", normalized_assignments, normalized_assignments
+    )
+    query_count = assignment_overlap.shape[-1]
     off_diagonal = ~torch.eye(
-        query_count, device=node_similarity.device, dtype=torch.bool
+        query_count, device=assignment_overlap.device, dtype=torch.bool
     ).unsqueeze(0)
-    diversity_loss = F.relu(node_similarity - diversity_margin)[off_diagonal.expand_as(node_similarity)].mean()
+    query_overlap_loss = F.relu(
+        assignment_overlap - query_overlap_margin
+    )[off_diagonal.expand_as(assignment_overlap)].mean()
     mean_assignment = outputs["region_assignment"].mean(dim=1)
     usage_loss = F.relu(query_usage_margin - mean_assignment).mean()
-    region_loss = diversity_loss + query_usage_weight * usage_loss
+    region_loss = query_overlap_loss + query_usage_weight * usage_loss
 
     total = (
         classification_loss
@@ -188,7 +195,7 @@ def coser_clip_loss(
         "mask_loss": mask_loss,
         "structure_loss": structure_loss,
         "region_loss": region_loss,
-        "diversity_loss": diversity_loss,
+        "query_overlap_loss": query_overlap_loss,
         "usage_loss": usage_loss,
         "online_labels": online_labels,
     }

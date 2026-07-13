@@ -47,6 +47,7 @@ class CoSeRCLIP(nn.Module):
         region_dim: int = 256,
         num_region_queries: int = 12,
         topk_confusions: int = 3,
+        topk_routing_negatives: int = 3,
         warmup_iters: int = 1000,
         classifier_threshold: float = 0.35,
         ablation: str = "full",
@@ -55,6 +56,7 @@ class CoSeRCLIP(nn.Module):
     ):
         super().__init__()
         self.method_name = "CoSeR-CLIP"
+        self.method_version = "11.5-NT"
         self.num_classes = num_classes
         self.num_foreground_classes = num_classes - 1
         self.dataset_name = dataset_name
@@ -106,6 +108,7 @@ class CoSeRCLIP(nn.Module):
             region_dim=region_dim,
             num_region_queries=num_region_queries,
             topk_confusions=topk_confusions,
+            topk_routing_negatives=topk_routing_negatives,
             warmup_iters=warmup_iters,
             classifier_threshold=classifier_threshold,
             ablation=ablation,

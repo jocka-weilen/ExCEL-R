@@ -1,6 +1,6 @@
 """Trainable CoSeR-CLIP evidence construction and routing modules.
 
-The implementation follows the equations in ``CoSeR_CLIP_Method_v11_CN_AAAI27``:
+The implementation follows ``CoSeR_CLIP_Method_v11_5_NT_CN_AAAI27``:
 deep semantic anchors, confusion-aware middle-level region ownership, shallow
 structure/semantic evidence, and pixel-wise signed evidence routing.
 """
@@ -80,12 +80,12 @@ class CoSeRCore(nn.Module):
         region_dim: int = 256,
         num_region_queries: int = 12,
         topk_confusions: int = 3,
+        topk_routing_negatives: int = 3,
         topq_ratio: float = 0.1,
         cls_temperature: float = 0.07,
         graph_temperature: float = 0.2,
         query_temperature: float = 0.1,
         confusion_cue_temperature: float = 0.2,
-        negative_temperature: float = 0.2,
         activation_temperature: float = 0.2,
         ownership_temperature: float = 0.1,
         shallow_temperature: float = 0.1,
@@ -108,6 +108,8 @@ class CoSeRCore(nn.Module):
             raise ValueError("num_region_queries must be at least 2")
         if topk_confusions < 1:
             raise ValueError("topk_confusions must be positive")
+        if topk_routing_negatives < 1:
+            raise ValueError("topk_routing_negatives must be positive")
         if not 0.0 < topq_ratio <= 1.0:
             raise ValueError("topq_ratio must be in (0, 1]")
         temperatures = {
@@ -115,7 +117,6 @@ class CoSeRCore(nn.Module):
             "graph_temperature": graph_temperature,
             "query_temperature": query_temperature,
             "confusion_cue_temperature": confusion_cue_temperature,
-            "negative_temperature": negative_temperature,
             "activation_temperature": activation_temperature,
             "ownership_temperature": ownership_temperature,
             "shallow_temperature": shallow_temperature,
@@ -143,12 +144,12 @@ class CoSeRCore(nn.Module):
 
         self.num_region_queries = num_region_queries
         self.topk_confusions = topk_confusions
+        self.topk_routing_negatives = topk_routing_negatives
         self.topq_ratio = topq_ratio
         self.cls_temperature = cls_temperature
         self.graph_temperature = graph_temperature
         self.query_temperature = query_temperature
         self.confusion_cue_temperature = confusion_cue_temperature
-        self.negative_temperature = negative_temperature
         self.activation_temperature = activation_temperature
         self.ownership_temperature = ownership_temperature
         self.shallow_temperature = shallow_temperature
@@ -320,7 +321,7 @@ class CoSeRCore(nn.Module):
             wt * text_distribution + wv * visual_distribution + wo * overlap_distribution
         ).detach()
         scores, indices = confusion.topk(negative_count, dim=-1)
-        weights = F.softmax(scores / self.negative_temperature, dim=-1)
+        weights = scores / scores.sum(dim=-1, keepdim=True).clamp_min(self.eps)
         return confusion, indices, weights
 
     @staticmethod
@@ -337,31 +338,33 @@ class CoSeRCore(nn.Module):
         self,
         class_logits: torch.Tensor,
         class_labels: Optional[torch.Tensor],
-        confusion_indices: torch.Tensor,
+        confusion_scores: torch.Tensor,
         competition_enabled: bool,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         b, classes = class_logits.shape
         if class_labels is None:
             active = torch.sigmoid(class_logits) >= self.classifier_threshold
             empty = ~active.any(dim=1)
             if empty.any():
                 active[empty, class_logits[empty].argmax(dim=1)] = True
-            return active, torch.zeros_like(active)
+            return active, torch.zeros_like(active), torch.zeros_like(class_logits)
 
         positive = class_labels > 0.5
         hard_negative = torch.zeros_like(positive)
+        image_hardness = torch.zeros_like(class_logits)
         if competition_enabled:
-            selected = confusion_indices[positive]
-            if selected.numel() > 0:
-                batch_index = (
-                    torch.arange(b, device=positive.device)[:, None]
-                    .expand(-1, classes)[positive]
-                    .unsqueeze(-1)
-                    .expand_as(selected)
-                )
-                hard_negative[batch_index.reshape(-1), selected.reshape(-1)] = True
-            hard_negative &= ~positive
-        return positive | hard_negative, hard_negative
+            negative_infinity = float("-inf")
+            target_scores = confusion_scores.masked_fill(
+                ~positive.unsqueeze(-1), negative_infinity
+            )
+            image_hardness = target_scores.amax(dim=1)
+            image_hardness = image_hardness.masked_fill(positive, negative_infinity)
+            count = min(self.topk_routing_negatives, classes)
+            values, indices = image_hardness.topk(count, dim=-1)
+            valid = torch.isfinite(values)
+            hard_negative.scatter_(1, indices, valid)
+            image_hardness = image_hardness.masked_fill(~torch.isfinite(image_hardness), 0.0)
+        return positive | hard_negative, hard_negative, image_hardness
 
     def forward(
         self,
@@ -398,21 +401,22 @@ class CoSeRCore(nn.Module):
 
         warmed_up = global_step is None or global_step >= self.warmup_iters
         competition_enabled = warmed_up and self.ablation != "no_confusion"
-        route_mask, hard_negative_mask = self._routing_masks(
-            class_logits, class_labels, confusion_indices, competition_enabled
+        route_mask, hard_negative_mask, routing_hardness = self._routing_masks(
+            class_logits, class_labels, confusion, competition_enabled
         )
 
         deep_on_middle = _resize_flat(deep_maps, deep_size, middle_size)
         region_mass = assignment.sum(dim=1).clamp_min(self.eps)
+        stopped_region_anchor = deep_on_middle.detach()
         positive_support = torch.einsum(
-            "blk,bcl->bck", assignment, deep_on_middle
+            "blk,bcl->bck", assignment, stopped_region_anchor
         ) / region_mass[:, None]
 
-        detached_support = torch.einsum(
-            "blk,bcl->bck", assignment, deep_on_middle.detach()
+        competing_support = torch.einsum(
+            "blk,bcl->bck", assignment, stopped_region_anchor
         ) / region_mass[:, None]
         negative_support_by_class = self._gather_classes(
-            detached_support, confusion_indices
+            competing_support, confusion_indices
         )
         negative_support = (
             negative_support_by_class * confusion_weights.unsqueeze(-1)
@@ -520,6 +524,7 @@ class CoSeRCore(nn.Module):
             "routing_logits": routing_logits,
             "route_mask": route_mask,
             "hard_negative_mask": hard_negative_mask,
+            "routing_hardness": routing_hardness,
             "deep_maps": deep_on_shallow.reshape(b, classes, *shallow_size),
             "middle_prior": middle_on_shallow.reshape(b, classes, *shallow_size),
             "confusion_support": negative_on_shallow.reshape(b, classes, *shallow_size),
@@ -531,6 +536,8 @@ class CoSeRCore(nn.Module):
             "region_assignment": assignment,
             "initial_region_assignment": initial_assignment,
             "region_nodes": region_nodes,
+            "region_positive_support": positive_support,
+            "region_negative_support": negative_support,
             "confusion_scores": confusion,
             "confusion_indices": confusion_indices,
             "confusion_weights": confusion_weights,

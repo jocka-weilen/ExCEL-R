@@ -30,6 +30,7 @@ class CoSeRCoreTest(unittest.TestCase):
             region_dim=16,
             num_region_queries=4,
             topk_confusions=2,
+            topk_routing_negatives=2,
             warmup_iters=2,
             **kwargs,
         )
@@ -51,11 +52,48 @@ class CoSeRCoreTest(unittest.TestCase):
         self.assertEqual(outputs["routing_logits"].shape, (2, 5))
         self.assertEqual(outputs["region_assignment"].shape, (2, 16, 4))
         self.assertTrue(outputs["hard_negative_mask"].any())
+        self.assertTrue(torch.all(outputs["hard_negative_mask"].sum(1) == 2))
+        self.assertFalse((outputs["hard_negative_mask"] & self.labels.bool()).any())
         for value in outputs.values():
             if torch.is_tensor(value):
                 self.assertTrue(torch.isfinite(value).all())
         assignment_sum = outputs["region_assignment"].sum(-1)
         self.assertTrue(torch.allclose(assignment_sum, torch.ones_like(assignment_sum), atol=1e-5))
+
+    def test_topk_confusion_is_directly_normalized(self):
+        outputs = self.forward(self.make_core(), step=3)
+        selected = torch.gather(
+            outputs["confusion_scores"], 2, outputs["confusion_indices"]
+        )
+        expected = selected / selected.sum(-1, keepdim=True).clamp_min(1e-6)
+        self.assertTrue(torch.allclose(outputs["confusion_weights"], expected, atol=1e-6))
+
+    def test_routing_negatives_use_image_level_absent_hardness(self):
+        outputs = self.forward(self.make_core(), step=3)
+        expected = torch.zeros_like(outputs["hard_negative_mask"])
+        for batch_index in range(self.batch):
+            positive = self.labels[batch_index].bool()
+            hardness = outputs["confusion_scores"][batch_index, positive].max(0).values
+            hardness[positive] = -torch.inf
+            expected[batch_index, hardness.topk(2).indices] = True
+        self.assertTrue(torch.equal(outputs["hard_negative_mask"], expected))
+
+    def test_region_ownership_stops_both_deep_anchor_gradients(self):
+        core = self.make_core()
+        outputs = self.forward(core, step=3)
+        region_objective = (
+            outputs["middle_prior"].sum() + outputs["confusion_support"].sum()
+        )
+        region_objective.backward()
+        deep_gradients = [
+            parameter.grad for parameter in core.deep_adapter.parameters()
+        ]
+        self.assertTrue(
+            all(gradient is None or torch.count_nonzero(gradient) == 0 for gradient in deep_gradients)
+        )
+        self.assertTrue(
+            any(parameter.grad is not None for parameter in core.middle_projection.parameters())
+        )
 
     def test_warmup_disables_confusion_competition(self):
         outputs = self.forward(self.make_core(), step=0)

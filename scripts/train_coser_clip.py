@@ -43,12 +43,12 @@ def build_parser(default_dataset: str = "pascal_voc") -> argparse.ArgumentParser
     parser.add_argument("--region_dim", default=256, type=int)
     parser.add_argument("--num_region_queries", default=12, type=int)
     parser.add_argument("--topk_confusions", default=3, type=int)
+    parser.add_argument("--topk_routing_negatives", default=3, type=int)
     parser.add_argument("--topq_ratio", default=0.10, type=float)
     parser.add_argument("--classifier_threshold", default=0.35, type=float)
     parser.add_argument("--graph_temperature", default=0.20, type=float)
     parser.add_argument("--query_temperature", default=0.10, type=float)
     parser.add_argument("--confusion_cue_temperature", default=0.20, type=float)
-    parser.add_argument("--negative_temperature", default=0.20, type=float)
     parser.add_argument("--activation_temperature", default=0.20, type=float)
     parser.add_argument("--ownership_temperature", default=0.10, type=float)
     parser.add_argument("--shallow_temperature", default=0.10, type=float)
@@ -77,7 +77,7 @@ def build_parser(default_dataset: str = "pascal_voc") -> argparse.ArgumentParser
     parser.add_argument("--negative_support_threshold", default=0.30, type=float)
     parser.add_argument("--shallow_gap_margin", default=0.10, type=float)
     parser.add_argument("--structure_ranking_margin", default=0.10, type=float)
-    parser.add_argument("--diversity_margin", default=0.80, type=float)
+    parser.add_argument("--query_overlap_margin", default=0.20, type=float)
     parser.add_argument("--query_usage_margin", default=0.02, type=float)
     parser.add_argument("--query_usage_weight", default=1.0, type=float)
 
@@ -236,6 +236,7 @@ def save_checkpoint(model, optimizer, iteration, args, path):
     torch.save(
         {
             "method": "CoSeR-CLIP",
+            "version": "11.5-NT",
             "iteration": iteration,
             "model": trainable_state,
             "optimizer": optimizer.state_dict(),
@@ -259,7 +260,11 @@ def train(args):
         setup_logger(filename=os.path.join(args.work_dir, "train.log"))
         with open(os.path.join(args.work_dir, "config.json"), "w", encoding="utf-8") as handle:
             json.dump(vars(args), handle, ensure_ascii=False, indent=2)
-        logging.info("Method: CoSeR-CLIP | device=%s | world_size=%d", device, world_size)
+        logging.info(
+            "Method: CoSeR-CLIP v11.5-NT | device=%s | world_size=%d",
+            device,
+            world_size,
+        )
 
     train_dataset, val_dataset = create_datasets(args)
     sampler = DistributedSampler(train_dataset, shuffle=True) if dist.is_initialized() else None
@@ -340,7 +345,7 @@ def train(args):
                 negative_support_threshold=args.negative_support_threshold,
                 shallow_gap_margin=args.shallow_gap_margin,
                 structure_ranking_margin=args.structure_ranking_margin,
-                diversity_margin=args.diversity_margin,
+                query_overlap_margin=args.query_overlap_margin,
                 query_usage_margin=args.query_usage_margin,
                 query_usage_weight=args.query_usage_weight,
                 ignore_index=args.ignore_index,
