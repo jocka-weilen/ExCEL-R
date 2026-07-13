@@ -448,7 +448,7 @@ class VisionTransformer(nn.Module):
         return x, attn_weights, all_feats
 
 
-class ExCEL_CLIP(nn.Module):
+class CoSeR_CLIP(nn.Module):
     def __init__(self,
                  embed_dim: int,
                  # vision
@@ -578,3 +578,7 @@ class ExCEL_CLIP(nn.Module):
 
         # shape = [global_batch_size, global_batch_size]
         return logits_per_image, logits_per_text
+
+
+# Kept only so baseline checkpoints and archived scripts remain loadable.
+ExCEL_CLIP = CoSeR_CLIP

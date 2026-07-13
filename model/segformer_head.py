@@ -3,11 +3,9 @@
 #
 # This work is licensed under the NVIDIA Source Code License
 # ---------------------------------------------------------------
-import numpy as np
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
-from mmcv.cnn import ConvModule
 
 class MLP(nn.Module):
     """

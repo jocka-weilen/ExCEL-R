@@ -1,8 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-file=./tools/infer_seg_voc.py
-inferset=train
-crf=false
-
-cpt=./00_sota/voc/checkpoints/model_iter_30000.pth
-python $file --model_path $cpt --infer_set $inferset  --crf_post $crf
+checkpoint="${1:?Usage: bash infer_seg_voc.sh CHECKPOINT [extra arguments]}"
+shift
+python tools/evaluate_coser_clip.py --dataset_name pascal_voc --checkpoint "$checkpoint" "$@"

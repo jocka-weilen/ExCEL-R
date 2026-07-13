@@ -1,6 +1,6 @@
 from torch import nn
 from .clip_model import CLIP
-from .clip_surgery_model import ExCEL_CLIP
+from .clip_surgery_model import CoSeR_CLIP, ExCEL_CLIP
 
 
 def convert_weights(model: nn.Module):
@@ -52,7 +52,13 @@ def build_model(name: str, state_dict: dict):
     transformer_heads = transformer_width // 64
     transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith(f"transformer.resblocks")))
 
-    if 'ExCEL' in name:
+    if 'CoSeR' in name:
+        model = CoSeR_CLIP(
+            embed_dim,
+            image_resolution, vision_layers, vision_width, vision_patch_size,
+            context_length, vocab_size, transformer_width, transformer_heads, transformer_layers
+        )
+    elif 'ExCEL' in name:
         model = ExCEL_CLIP(
             embed_dim,
             image_resolution, vision_layers, vision_width, vision_patch_size,

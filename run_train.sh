@@ -1,9 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-file=./scripts/train_voc.py
-device_gpu=0
-nproc_per_node=1
-master_port=29733
-exp_des=$1
+dataset="${1:-voc}"
+shift || true
 
-CUDA_VISIBLE_DEVICES=$device_gpu python -m torch.distributed.launch --nproc_per_node=$nproc_per_node --master_port=$master_port $file --log_tag=$exp_des
+case "$dataset" in
+  voc) script="scripts/train_voc.py" ;;
+  coco) script="scripts/train_coco.py" ;;
+  *) echo "Usage: bash run_train.sh {voc|coco} [CoSeR-CLIP arguments]" >&2; exit 2 ;;
+esac
+
+if [[ "${NPROC_PER_NODE:-1}" -gt 1 ]]; then
+  torchrun --nproc_per_node="${NPROC_PER_NODE}" --master_port="${MASTER_PORT:-29733}" "$script" "$@"
+else
+  python "$script" "$@"
+fi
